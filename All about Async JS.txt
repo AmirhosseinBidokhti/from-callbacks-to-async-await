@@ -1,0 +1,333 @@
+# Callback inside callbacks(a way to write async code in nodejs); problems with that
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+const fs = require('fs');
+
+const superagent = require('superagent');
+
+fs.readFile(`${__dirname}/dog.txt`, (err, data) => {
+    console.log(`Breed: ${data}`);
+    
+    superagent.get(`https://dog.ceo/api/breed/${data}/images/random`)
+    .end((err, result) => {
+        
+        if(err) return console.log(err.message);
+        
+        console.log(result.body);
+        console.log(result.body.message);
+        
+        fs.writeFile('dog-img.txt', result.body.message, err => {
+            console.log('Random dog image saved to file!')
+        })
+    })
+   
+});
+
+// For doing this http request, we needed the 'data' we got. 
+// So we needed to do this request inside of that callback function of readfile function.
+// Then write that into a file. again another callback function.
+
+// This is just a small example to show you how easy it is to end-up with callbacks inside of callbacks.
+// because we know we should always use async code in nodejs.
+
+// All these callbacks makes our code looks very messy and difficult to understand and maintain.
+// Not at this level but we could end up having more levels of nesting and it quickly becomes a nightmare.
+
+// At this point this was the only way we knew to write asnychronous code.
+
+// We will learn to write something called promise. solve our problem make our code easier to read and maintain.
+
+
+
+
+# From callbacks to promises (consumption of them)
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+- Using promise for http request instead of callback.
+- Superagent library has support for promises out of the box.
+
+- For node functions coming from internal node packages like readFile we will actually have to build promises ourselves.
+- For now we will learn how to consume promises 
+
+- get method returns a promise (basically implements the concept of a future value)
+- a value we are expecting to receive in some time in future.
+- like hey api please get me a random dog image in background and let me know when you are ready and then give me that.
+
+- get method, will automatically and immediately return a promise as soon as we start the request.
+- The promise does not have a value yet because api is getting the value async in background but promise is 
+- immediately available and promising us that it will get some data back in the future.
+
+- state of promise in that case is (right in the beginning): pending promise (hasn't gotten back with any data)
+
+
+- .get(`https://dog.ceo/api/breed/${data}/images/random`)
+  at this point we already have a promise that we can work with all we should do is to comsume it. (wait for it to come back with with data)
+
+- then method on it. in it we pass a callback function
+
+- will be called as soon as the promise is done and is coming with data. data available as argument in this callback.
+
+
+	fs.readFile(`${__dirname}/dog.txt`, (err, data) => {
+	    console.log(`Breed: ${data}`);
+	    
+	    superagent
+	    .get(`https://dog.ceo/api/breed/${data}/images/random`) 
+	    .then((res)=> {
+		
+		console.log(res.body);
+		console.log(res.body.message);
+		
+		fs.writeFile('dog-img.txt', res.body.message, err => {
+		    console.log('Random dog image saved to file!')
+		})        
+	    }).catch((err) =>{
+		console.log('Ahh! ' + err.message);
+	    })
+	});
+
+- A promise as soon as it comes back with data is called a "resolved promise" (taklif o maloom karde dg) 
+
+- However a resolved promise may not be successful due to an error.
+
+- Resolved promise =>
+        // full-filled => has a result we want to use
+        // rejected => when there was an error.
+        
+// then only handles fullfilled promises.
+// For rejected ones we have the catch method. will get called if there was an error. we have access to that error object.
+
+// right after then we can chain catch method.
+
+// This how we comsuse promises. we started with get method which returned a promise and on that we chain
+// the then method which handles the succuessful promise and also chained catch method which handles rejected promise.
+
+// But all of these still look like callback hell. since still has that callback function we passed to readFile
+// and the callback of writeFile
+
+// Next lecture will fix that by building our own promises.
+
+
+
+
+
+# Building Promises
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+- Will promisify the readFile and writeFile functions will make them so they return promise
+  Instead of us passing a callback function to them
+
+
+- ReadFile function returns promise, only recieve a file name not a callback.
+
+- This promise constructor takes in what so called executor function, which will be called immediately 
+  when promise is created. (where we do our async works)
+
+- takes in 2 arguments. resolve, reject. they are both function and available in executor function.
+
+- calling resolve => mark promise as successful(fullfilled) and return successful value of the promise.
+
+- whatever variable that we pass into resolve function is what will later available as argument in then method.
+ (value that promise will return to us)
+
+- we can also mark promise as rejected in case there was an error.  with reject function.
+  whatever we pass into this one will be the error later in catch method. 
+
+
+
+	const readFilePro = file => {
+	    return new Promise((resolve, reject) => {
+		fs.readFile(file, (err, data) => {
+		    if(err) reject('I could not find that file :(');
+		    resolve(data);
+		})
+	    })
+	}
+
+	const writeFilePro = (file, data) => {
+	    return new Promise((resolve, reject) =>{
+		fs.writeFile(file, data, err => {
+		    if(err) reject('Could not write file :(');
+		})
+		resolve('success'); 
+	    })
+	}
+
+
+
+-----------------------------------------------------------------------------------------------------
+- lets implement the chaining. right now nothing changed since its still callbacks inside callbacks.
+- by each handler returning a new promise
+
+readFilePro(`${__dirname}/dog.txt`)
+
+    .then(data => {
+     
+    	console.log(`Breed: ${data}`);
+    	return superagent.get(`https://dog.ceo/api/breed/${data}/images/random`);
+    })
+    .then((res)=>{    
+        console.log(res.body.message);
+        return writeFilePro('dog-img.txt', res.body.message)    
+    })
+    .then(()=> {
+        console.log('Random dog image saved to file!')
+    })
+    .catch((err) =>{
+        console.log('Ahh! ' + err.message);
+    })
+    
+-  the trick to be able to chain all these then methods is to return a promise before calling each of them.
+-  reject function will cause catch function to be called.
+
+
+
+
+
+
+
+# Consuming Promises with AsyncAwait
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+- Promises made our code better but we can still do much better. instead of consuming promises with then method which still makes us use all these callback function
+  we can use async/await.
+  new feature introduced in ES8
+  
+
+- In order to use async/await we need to create a so-called async function. indicate that this function is asynchronous, basically running in the background while rest of the code
+  keeps running.
+  
+  will do async work without ever blocking the event loop.
+  
+  will also automatically return a promise. more on that later.
+  
+- Inside an async function we can always have one or more await expression.
+
+
+---------------------------------------------------------------------------
+- await and then promise!
+
+- then we can save result of that into a variable.
+
+- remember we can only use await if it is inside an async function. it allows us to get rid of all the then handlers with callback functions in them and make our code looks more sync.
+
+
+
+	---------------------------------------------------------------------------------------------------------
+	const getDogPic = async () => {
+	    
+	    // this await will basically stop the code from running at this point until this promise is resolved.
+	    // if promise is fullfilled, then value of await expression is the resolved value of promise.
+	    // finally assigned to data variable.
+	    
+	    try {
+	    
+	    	// instead of having promise then the then method on it which then give data as argument 
+	    	
+	    	const data = await readFilePro(`${__dirname}/dog.txt`); 
+	    	console.log(`Breed: ${data}`);
+	    
+	    	// result of then handler of API calling
+	    	const res = await superagent.get(`https://dog.ceo/api/breed/${data}/images/random`);
+	    	console.log(res.body.message);
+	    
+	    	// finally stop the code here until that writing process is finished.
+	    	await writeFilePro('dog-img.txt', res.body.message);
+	    	console.log('Random dog image saved to file!');
+		
+	    } catch(err) {
+		console.log(err);
+	    }
+	    
+	};
+	
+	// to make this code works simply calling it:
+	getDogPic();
+
+
+
+- finaly thing to do is our error handling tho. we use something called try catch which has nothing to do with async await.
+- it is a standard js feature.
+
+- wrap all our code into a try block. code will try to execute whatever is there then catch block will have access to error
+  if happens. 
+
+ 
+ 
+ 
+
+ 
+# Returning Values from Async Functions
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+- Lets understand better how the async await actually works.
+
+
+	console.log('1. will get dog pics');
+	getDogPic();
+	console.log('2.done getting dog pics');
+
+	---------------------------------------
+	1. will get dog pics
+	2. done getting dog pics
+	Breed: labrador
+	https://images.dog.ceo/breeds/labrador/n02099712_7683.jpg
+	Random dog image saved to file!
+
+
+- Async function runs in the background. we cannot just stop the code there. the main thread. whole pholosophy of dont block the event loop.
+
+- so we need to get some dog picture from the API, but that is not an excuse to stop execution of our code so the event loop.
+
+- now what if the async function returned something as well?
+
+	return '2: READY DOGG';
+
+	---------------------------------------
+	console.log('1. will get dog pics');
+	const x = getDogPic();
+	console.log(x);
+	console.log('3. done getting dog pics');
+
+
+	1. will get dog pics
+	Promise { <pending> }
+	3. done getting dog pics
+	Breed: labrador
+	https://images.dog.ceo/breeds/labrador/n02099712_719.jpg
+	Random dog image saved to file!
+	
+
+- instead of the string we returned we got the 'Promise { <pending> }' 
+
+- remember we said async function returns a promise automatically so here is a proof. instead of logging ready it tells that x is promise which is still running in background.
+
+- What if we really wanted the value that is being returned?????
+	
+	we should treat it async as promise. we would use then method or async await again.
+	
+	
+	/ console.log('1. will get dog pics');
+
+	// getDogPic().then(x=> {
+	//     console.log(x);
+	//     console.log('3. done getting dog pics')
+
+	// })
+	// even if promise rejects, it still resolves as successful promise and return promise.
+	// to avoid that if we want, we can throw an error in catch block of async function.
+
+
+	(async () => {
+	    try {
+		console.log('1. will get dog pics');
+		const x = await getDogPic();
+		log(x);
+		console.log('3. done getting dog pics')        
+	    } 
+	    catch(err) {
+		console.log(err);
+	    }
+	})
+	
+	
+
